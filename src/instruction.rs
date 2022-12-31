@@ -15,6 +15,7 @@ pub enum MovieInstruction {
     AddComment {
         comment: String,
     },
+    InitializedMint,
 }
 
 #[derive(BorshDeserialize)]
@@ -57,6 +58,7 @@ impl MovieInstruction {
                     comment: payload.comment,
                 }
             }
+            3 => Self::InitializedMint,
             _ => return Err(ProgramError::InvalidInstructionData),
         })
     }
