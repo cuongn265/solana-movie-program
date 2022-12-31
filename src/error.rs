@@ -1,4 +1,5 @@
 use solana_program::program_error::ProgramError;
+use spl_token::error;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -14,6 +15,9 @@ pub enum ReviewError {
 
     #[error("Rating greater than 5 or less than 1")]
     InvalidRating,
+
+    #[error("Account does not match")]
+    IncorrectAccountError,
 }
 
 impl From<ReviewError> for ProgramError {

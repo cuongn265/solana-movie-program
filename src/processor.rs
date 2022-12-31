@@ -16,6 +16,7 @@ use solana_program::{
     system_program::ID as SYSTEM_PROGRAM_ID,
     sysvar::{rent::Rent, rent::ID as RENT_PROGRAM_ID, Sysvar},
 };
+use spl_associated_token_account::get_associated_token_address;
 use spl_token::{instruction::initialize_mint, ID as TOKEN_PROGRAM_ID};
 use std::convert::TryInto;
 
@@ -63,17 +64,20 @@ fn initialize_token_mint(
     msg!("Mint authority: {:?}", mint_auth_pda);
 
     if mint_pda != *token_mint.key {
+        msg!("token mint key: {}", *token_mint.key);
+        msg!("mint_pda: {}", mint_pda);
         msg!("Incorrect token mint account");
         return Err(ReviewError::IncorrectAccountError.into());
     }
 
-    if *token_mint.key != TOKEN_PROGRAM_ID {
+    if *token_program.key != TOKEN_PROGRAM_ID {
         msg!("Incorrect token program");
         return Err(ReviewError::IncorrectAccountError.into());
     }
 
     if *mint_auth.key != mint_auth_pda {
-        msg!("Incorrect token program");
+        msg!("Incorrect mint auth account");
+
         return Err(ReviewError::IncorrectAccountError.into());
     }
     if *system_program.key != SYSTEM_PROGRAM_ID {
@@ -82,7 +86,7 @@ fn initialize_token_mint(
     }
 
     if *sysvar_rent.key != RENT_PROGRAM_ID {
-        msg!("Incorrect token program");
+        msg!("Incorrect rent program");
         return Err(ReviewError::IncorrectAccountError.into());
     }
 
@@ -104,7 +108,19 @@ fn initialize_token_mint(
         ],
         &[&[b"token_mint", &[mint_bump]]],
     )?;
+    msg!("Create token mint account");
 
+    invoke_signed(
+        &initialize_mint(
+            token_program.key,
+            token_mint.key,
+            mint_auth.key,
+            Option::None,
+            9,
+        )?,
+        &[token_mint.clone(), sysvar_rent.clone(), mint_auth.clone()],
+        &[&[b"token_mint", &[mint_bump]]],
+    )?;
     msg!("Initialized token mint");
 
     Ok(())
@@ -127,8 +143,37 @@ pub fn add_movie_review(
     let initializer = next_account_info(account_info_iter)?;
     let pda_account = next_account_info(account_info_iter)?;
     let pda_counter = next_account_info(account_info_iter)?;
-    let system_program = next_account_info(account_info_iter)?;
+    let token_mint = next_account_info(account_info_iter)?;
+    let mint_auth = next_account_info(account_info_iter)?;
+    let user_ata = next_account_info(account_info_iter)?;
 
+    let system_program = next_account_info(account_info_iter)?;
+    let token_program = next_account_info(account_info_iter)?;
+
+    msg!("deriving mint authority");
+    let (mint_pda, _mint_bump) = Pubkey::find_program_address(&[b"token_mint"], program_id);
+    let (mint_auth_pda, mint_auth_bump) =
+        Pubkey::find_program_address(&[b"token_auth"], program_id);
+
+    if *token_mint.key != mint_pda {
+        msg!("Incorrect token mint");
+        return Err(ReviewError::IncorrectAccountError.into());
+    }
+
+    if *mint_auth.key != mint_auth_pda {
+        msg!("Mint passed in and mint derived do not match");
+        return Err(ReviewError::InvalidPDA.into());
+    }
+
+    if *user_ata.key != get_associated_token_address(initializer.key, token_mint.key) {
+        msg!("Incorrect token mint");
+        return Err(ReviewError::IncorrectAccountError.into());
+    }
+
+    if *token_program.key != TOKEN_PROGRAM_ID {
+        msg!("Incorrect token program");
+        return Err(ReviewError::IncorrectAccountError.into());
+    }
     if !initializer.is_signer {
         msg!("Missing required signature");
         return Err(ProgramError::MissingRequiredSignature);
@@ -244,6 +289,20 @@ pub fn add_movie_review(
     counter_data.is_initialized = true;
     msg!("comment count: {}", counter_data.counter);
     counter_data.serialize(&mut &mut pda_counter.data.borrow_mut()[..])?;
+
+    msg!("Minting 10 tokens to User associated token account");
+    invoke_signed(
+        &spl_token::instruction::mint_to(
+            token_program.key,
+            token_mint.key,
+            user_ata.key,
+            mint_auth.key,
+            &[],
+            10 * LAMPORTS_PER_SOL,
+        )?, // Unwrap
+        &[token_mint.clone(), user_ata.clone(), mint_auth.clone()],
+        &[&[b"token_mint", &[mint_auth_bump]]],
+    )?;
 
     Ok(())
 }
